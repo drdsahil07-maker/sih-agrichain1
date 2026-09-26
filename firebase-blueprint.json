@@ -1,0 +1,219 @@
+{
+  "entities": {
+    "user": {
+      "title": "User Account",
+      "description": "Authenticated user account record with assigned role",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "phone": { "type": "string" },
+        "role": { "type": "string", "enum": ["farmer", "distributor", "transporter", "admin"] },
+        "profileComplete": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "lastLoginAt": { "type": "string" }
+      },
+      "required": ["uid", "name", "role", "profileComplete"]
+    },
+    "farmerProfile": {
+      "title": "Farmer Profile",
+      "description": "Detailed profile for registered agricultural producer",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "village": { "type": "string" },
+        "district": { "type": "string" },
+        "state": { "type": "string" },
+        "crops": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "name", "phone"]
+    },
+    "distributorProfile": {
+      "title": "Distributor Profile",
+      "description": "Detailed profile for commercial buyer or distributor",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "businessName": { "type": "string" },
+        "ownerName": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "businessType": { "type": "string" },
+        "city": { "type": "string" },
+        "state": { "type": "string" },
+        "cropsInterestedIn": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "businessName", "phone"]
+    },
+    "transporterProfile": {
+      "title": "Transporter Profile",
+      "description": "Detailed profile for fleet owner or independent vehicle operator",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "vehicleNumber": { "type": "string" },
+        "vehicleType": { "type": "string" },
+        "vehicleCapacity": { "type": "string" },
+        "currentLocation": { "type": "string" },
+        "preferredRoutes": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["uid", "name", "phone", "vehicleNumber"]
+    },
+    "admin": {
+      "title": "Admin Record",
+      "description": "Admin identity marker document used for zero-trust authorization",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "assignedBy": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid"]
+    },
+    "harvest": {
+      "title": "Harvest",
+      "description": "Farm harvest listing posted by farmer",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "farmerId": { "type": "string" },
+        "farmerName": { "type": "string" },
+        "crop": { "type": "string" },
+        "quantityKg": { "type": "number" },
+        "location": { "type": "string" },
+        "minAcceptablePrice": { "type": "number" },
+        "qualityGrade": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["crop", "quantityKg", "minAcceptablePrice"]
+    },
+    "buyerDemand": {
+      "title": "Buyer Demand",
+      "description": "Demand posted by commercial buyer or kitchen",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "buyerId": { "type": "string" },
+        "buyerName": { "type": "string" },
+        "crop": { "type": "string" },
+        "requiredQuantityKg": { "type": "number" },
+        "maxLandedPrice": { "type": "number" },
+        "qualityGrade": { "type": "string" },
+        "deliveryLocation": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["crop", "requiredQuantityKg", "maxLandedPrice"]
+    },
+    "backhaulTrip": {
+      "title": "Backhaul Trip",
+      "description": "Available empty return trip capacity posted by transporter",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "transporterId": { "type": "string" },
+        "transporterName": { "type": "string" },
+        "vehicleType": { "type": "string" },
+        "origin": { "type": "string" },
+        "destination": { "type": "string" },
+        "availableCapacityKg": { "type": "number" },
+        "departureTime": { "type": "string" },
+        "status": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["transporterName", "origin", "destination", "availableCapacityKg"]
+    },
+    "callRecord": {
+      "title": "Call Record",
+      "description": "Voice conversation record logged from farmer telephony",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "farmerName": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "crop": { "type": "string" },
+        "quantityKg": { "type": "number" },
+        "minAcceptablePrice": { "type": "number" },
+        "durationSeconds": { "type": "number" },
+        "timestamp": { "type": "string" },
+        "status": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["farmerName", "crop", "quantityKg", "minAcceptablePrice"]
+    },
+    "order": {
+      "title": "Order",
+      "description": "Matched trade and escrow contract",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "crop": { "type": "string" },
+        "quantityKg": { "type": "number" },
+        "agreedPricePerKg": { "type": "number" },
+        "buyerId": { "type": "string" },
+        "farmerId": { "type": "string" },
+        "transporterId": { "type": "string" },
+        "status": { "type": "string" },
+        "escrowStatus": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "crop", "quantityKg", "agreedPricePerKg"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "user" },
+      "description": "Registered user accounts with roles for Farmer, Distributor, Transporter, and Admin"
+    },
+    "/farmers/{farmerId}": {
+      "schema": { "$ref": "farmerProfile" },
+      "description": "Farmer role profiles containing location, acreage, and crop details"
+    },
+    "/distributors/{distributorId}": {
+      "schema": { "$ref": "distributorProfile" },
+      "description": "Distributor role profiles containing business name and procurement requirements"
+    },
+    "/transporters/{transporterId}": {
+      "schema": { "$ref": "transporterProfile" },
+      "description": "Transporter role profiles containing vehicle numbers, type, capacity and routes"
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "admin" },
+      "description": "Admin verification documents"
+    },
+    "/harvests/{harvestId}": {
+      "schema": { "$ref": "harvest" },
+      "description": "Harvest listings posted by farmers"
+    },
+    "/buyer_demands/{demandId}": {
+      "schema": { "$ref": "buyerDemand" },
+      "description": "Open procurement demands from verified commercial buyers"
+    },
+    "/backhaul_trips/{tripId}": {
+      "schema": { "$ref": "backhaulTrip" },
+      "description": "Transporter return trip listings and available load slots"
+    },
+    "/call_records/{recordId}": {
+      "schema": { "$ref": "callRecord" },
+      "description": "Telephony audio and transcript records"
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "order" },
+      "description": "Supply chain trades and contracts"
+    }
+  }
+}

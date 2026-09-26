@@ -1,0 +1,30 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "frontend": {
+      "root": "frontend",
+      "framework": "vite",
+      "installCommand": "npm --prefix .. install",
+      "buildCommand": "npx --prefix .. vite build --config ../vite.config.ts",
+      "outputDirectory": "../dist"
+    },
+    "backend": {
+      "root": "backend",
+      "entrypoint": "server.ts"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": {
+        "service": "backend"
+      }
+    },
+    {
+      "source": "/(.*)",
+      "destination": {
+        "service": "frontend"
+      }
+    }
+  ]
+}

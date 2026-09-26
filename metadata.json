@@ -1,0 +1,6 @@
+{
+  "name": "AgriChain",
+  "description": "Connect. Trade. Deliver. An agricultural value-chain platform connecting farmers, distributors, transporters, and bulk consumers with transparent pricing and reliable delivery.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

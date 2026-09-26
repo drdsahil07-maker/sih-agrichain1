@@ -1,0 +1,156 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net Default-Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isUser(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasRole(role) {
+      return isSignedIn() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         getUserData().role == role) || isAdmin()
+      );
+    }
+
+    // Entity validation functions
+    function isValidUser(data) {
+      return data.uid is string && data.uid == request.auth.uid &&
+             data.role in ['farmer', 'distributor', 'buyer', 'transporter', 'admin'];
+    }
+
+    function isValidHarvest(data) {
+      return data.crop is string && data.crop.size() > 0 && data.crop.size() <= 100 &&
+             data.quantityKg is number && data.quantityKg > 0 && data.quantityKg <= 200000 &&
+             data.minAcceptablePrice is number && data.minAcceptablePrice > 0 && data.minAcceptablePrice <= 20000;
+    }
+
+    function isValidBuyerDemand(data) {
+      return data.crop is string && data.crop.size() > 0 && data.crop.size() <= 100 &&
+             data.requiredQuantityKg is number && data.requiredQuantityKg > 0 &&
+             data.maxLandedPrice is number && data.maxLandedPrice > 0;
+    }
+
+    function isValidBackhaulTrip(data) {
+      return data.transporterName is string && data.transporterName.size() > 0 && data.transporterName.size() <= 100 &&
+             data.origin is string && data.origin.size() > 0 && data.origin.size() <= 150 &&
+             data.destination is string && data.destination.size() > 0 && data.destination.size() <= 150 &&
+             data.availableCapacityKg is number && data.availableCapacityKg > 0;
+    }
+
+    function isValidCallRecord(data) {
+      return data.farmerName is string && data.farmerName.size() > 0 && data.farmerName.size() <= 100 &&
+             data.crop is string && data.crop.size() > 0 && data.crop.size() <= 100 &&
+             data.quantityKg is number &&
+             data.minAcceptablePrice is number;
+    }
+
+    function isValidOrder(data) {
+      return data.crop is string &&
+             data.quantityKg is number && data.quantityKg > 0 &&
+             data.agreedPricePerKg is number && data.agreedPricePerKg > 0;
+    }
+
+    // 1. User Accounts with Role-Based Access Control
+    match /users/{userId} {
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow list: if isAdmin();
+      allow create: if isUser(userId) && isValidUser(request.resource.data) && 
+                    (request.resource.data.role != 'admin' || isAdmin());
+      allow update: if isUser(userId) && isValidUser(request.resource.data) && 
+                    (request.resource.data.role == resource.data.role || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Role-specific profile collections
+    match /farmers/{farmerId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create, update: if isUser(farmerId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /distributors/{distributorId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create, update: if isUser(distributorId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /transporters/{transporterId} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      allow create, update: if isUser(transporterId) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // 2. Admin Marker Collection
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // 3. Harvests Collection
+    match /harvests/{harvestId} {
+      allow read: if true;
+      allow create: if isSignedIn() && isValidHarvest(request.resource.data);
+      allow update: if isSignedIn() && isValidHarvest(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // 4. Buyer Demands Collection
+    match /buyer_demands/{demandId} {
+      allow read: if true;
+      allow create: if isSignedIn() && isValidBuyerDemand(request.resource.data);
+      allow update: if isSignedIn() && isValidBuyerDemand(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // 5. Backhaul Trips Collection
+    match /backhaul_trips/{tripId} {
+      allow read: if true;
+      allow create: if isSignedIn() && isValidBackhaulTrip(request.resource.data);
+      allow update: if isSignedIn() && isValidBackhaulTrip(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // 6. Call Records Collection
+    match /call_records/{recordId} {
+      allow read: if isSignedIn() || true;
+      allow create: if isSignedIn() && isValidCallRecord(request.resource.data);
+      allow update: if isSignedIn() && isValidCallRecord(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // 7. Orders & Escrow Contracts
+    match /orders/{orderId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidOrder(request.resource.data);
+      allow update: if isSignedIn() && isValidOrder(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    // 8. Probe / Test Document for Connectivity Verification
+    match /test/{docId} {
+      allow read, write: if true;
+    }
+  }
+}
