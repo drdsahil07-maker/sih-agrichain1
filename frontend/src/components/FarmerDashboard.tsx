@@ -167,7 +167,7 @@ export const FarmerDashboard: React.FC<FarmerDashboardProps> = ({
           <ArrowRight className="w-5 h-5 text-indigo-400 sm:hidden" />
         </button>
 
-        {/* Simulated Outbound Phone Call */}
+        {/* Outbound AI Phone Call */}
         <button
           id="btn-farmer-call"
           onClick={onOpenCall}
@@ -178,7 +178,7 @@ export const FarmerDashboard: React.FC<FarmerDashboardProps> = ({
           </div>
           <div>
             <div className="text-sm font-extrabold font-display text-amber-950">AI Phone Call</div>
-            <p className="text-xs text-amber-800 mt-0.5">Auto-Call Ramesh Ji (Simulation)</p>
+            <p className="text-xs text-amber-800 mt-0.5">AgriMitra Call (Real AI Outbound)</p>
           </div>
           <ArrowRight className="w-5 h-5 text-amber-400 sm:hidden" />
         </button>

@@ -1,6 +1,14 @@
 import { Router } from 'express';
 import { requireAuth, requireRole } from '../middleware/auth';
-import { getGovernmentOverview, getSupplyDemand, getPools, getLogistics } from '../controllers/government.controller';
+import { 
+  getGovernmentOverview, 
+  getSupplyDemand, 
+  getPools, 
+  getLogistics, 
+  getFarmers, 
+  getExotelStatus, 
+  initiateAdminFarmerCall 
+} from '../controllers/government.controller';
 
 const router = Router();
 
@@ -12,5 +20,8 @@ router.get('/overview', getGovernmentOverview);
 router.get('/supply-demand', getSupplyDemand);
 router.get('/pools', getPools);
 router.get('/logistics', getLogistics);
+router.get('/farmers', getFarmers);
+router.get('/farmer-calls/status', getExotelStatus);
+router.post('/farmer-calls', initiateAdminFarmerCall);
 
 export default router;

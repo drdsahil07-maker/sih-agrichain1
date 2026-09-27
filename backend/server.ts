@@ -25,8 +25,33 @@ if (process.env.VITE_SUPABASE_ANON_KEY) {
   process.env.VITE_SUPABASE_ANON_KEY = 'sb_publishable_JA52E1ro6ibUVSm5Bb3G1Q_mqRuKJ6l';
 }
 
+import http from "http";
+import { WebSocketServer } from "ws";
+import { handleExotelStream } from "./src/services/exotel.service";
+
 async function startServer() {
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+
+  // Create HTTP Server
+  const server = http.createServer(app);
+
+  // Attach WebSocket Server
+  const wss = new WebSocketServer({ noServer: true });
+
+  wss.on('connection', (ws) => {
+    handleExotelStream(ws);
+  });
+
+  server.on('upgrade', (request, socket, head) => {
+    const pathname = new URL(request.url || '', `http://${request.headers.host}`).pathname;
+    if (pathname === '/api/exotel-stream') {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+      });
+    } else {
+      socket.destroy();
+    }
+  });
 
   // ==========================================
   // VITE OR STATIC FRONTEND SERVING
@@ -46,8 +71,8 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[AgriChain] Server running on http://0.0.0.0:${PORT}`);
+  server.listen(PORT, "0.0.0.0", () => {
+    console.log(`[AgriChain] Server running on http://0.0.0.0:${PORT} with Exotel Voice Stream support`);
   });
 }
 

@@ -18,6 +18,7 @@ import { AIFarmerCallModal } from './components/AIFarmerCallModal';
 import { AssistedAccessModal } from './components/AssistedAccessModal';
 import { SellHarvestModal } from './components/SellHarvestModal';
 import { AuthModal } from './components/AuthModal';
+import { FeedbackButton } from './components/FeedbackButton';
 
 import { Harvest, ChainOption, QualityGrade } from '../../shared/types';
 import { api } from './services/api';
@@ -242,6 +243,8 @@ export default function App() {
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
       />
+
+      <FeedbackButton currentTab={currentTab} />
     </div>
   );
 }

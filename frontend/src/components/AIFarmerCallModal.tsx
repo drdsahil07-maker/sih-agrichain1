@@ -18,10 +18,14 @@ import {
   Scale,
   Sprout,
   Play,
-  RotateCcw
+  RotateCcw,
+  Loader2,
+  AlertCircle,
+  FileText
 } from 'lucide-react';
 import { speech } from '../utils/speech';
 import { api } from '../services/api';
+import { fetchWithAuth } from '../services/apiFetch';
 
 interface AIFarmerCallModalProps {
   isOpen: boolean;
@@ -39,14 +43,15 @@ interface DialogueItem {
   timestamp: string;
 }
 
-type CallStage = 'calling' | 'ask_crop' | 'ask_quantity' | 'ask_price' | 'completed' | 'ended';
+type CallStage = 'initiate_call' | 'calling' | 'ask_crop' | 'ask_quantity' | 'ask_price' | 'completed' | 'ended';
 
 export const AIFarmerCallModal: React.FC<AIFarmerCallModalProps> = ({
   isOpen,
   onClose,
   onHarvestCreated,
 }) => {
-  const [callState, setCallState] = useState<CallStage>('calling');
+  const [callState, setCallState] = useState<CallStage>('initiate_call');
+  const [phoneNumber, setPhoneNumber] = useState('+91 98260 11234');
   const [seconds, setSeconds] = useState(0);
   const [dialogue, setDialogue] = useState<DialogueItem[]>([]);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -55,6 +60,10 @@ export const AIFarmerCallModal: React.FC<AIFarmerCallModalProps> = ({
   const [speechRate, setSpeechRate] = useState<number>(1.0);
   const [preferredLang, setPreferredLang] = useState<'hi' | 'en'>('hi');
   const [isAutoPlaying, setIsAutoPlaying] = useState(false);
+
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [configPending, setConfigPending] = useState(false);
 
   // Harvest data updated step by step
   const [harvestData, setHarvestData] = useState<{
@@ -118,29 +127,6 @@ export const AIFarmerCallModal: React.FC<AIFarmerCallModalProps> = ({
     return id;
   };
 
-  // Replay speech
-  const handleReplayAudio = (item: DialogueItem) => {
-    speech.stopSpeech();
-    speech.speak({
-      text: item.text,
-      isAi: item.isAi,
-      rate: speechRate,
-      preferredLang,
-      onStart: () => {
-        setIsSpeaking(true);
-        setCurrentSpeakingId(item.id);
-      },
-      onEnd: () => {
-        setIsSpeaking(false);
-        setCurrentSpeakingId(null);
-      },
-      onError: () => {
-        setIsSpeaking(false);
-        setCurrentSpeakingId(null);
-      }
-    });
-  };
-
   // Lifecycle when modal opens
   useEffect(() => {
     if (!isOpen) {
@@ -150,7 +136,7 @@ export const AIFarmerCallModal: React.FC<AIFarmerCallModalProps> = ({
       }
       clearTimeout(autoPlayTimeoutRef.current);
       speech.stopSpeech();
-      setCallState('calling');
+      setCallState('initiate_call');
       setSeconds(0);
       setDialogue([]);
       setIsSpeaking(false);
@@ -164,34 +150,16 @@ export const AIFarmerCallModal: React.FC<AIFarmerCallModalProps> = ({
         qualityGrade: 'Grade A',
         location: 'Sanwer (Village Cluster A), Indore'
       });
+      setErrorMsg(null);
+      setConfigPending(false);
       return;
     }
-
-    // Call connects after 1.5s -> Starts asking Question 1 (Crop)
-    const connectTimer = setTimeout(() => {
-      setCallState('ask_crop');
-
-      // AI asks: Greeting + Which Crop?
-      setTimeout(() => {
-        addDialogueMessage(
-          'AgriMitra (AI Calling Assistant)',
-          'Namaste Ramesh ji! Main AgriChain se aapka AI Calling Assistant AgriMitra bol raha hoon. Ramesh ji, aaj aapke khet mein kaun si fasal (crop) taiyyar hui hai bechne ke liye?',
-          true
-        );
-      }, 500);
-    }, 1500);
-
-    return () => {
-      clearTimeout(connectTimer);
-      clearTimeout(autoPlayTimeoutRef.current);
-      speech.stopSpeech();
-    };
   }, [isOpen]);
 
   // Duration Timer
   useEffect(() => {
     let interval: any;
-    if (callState !== 'calling' && callState !== 'ended') {
+    if (callState !== 'initiate_call' && callState !== 'calling' && callState !== 'ended') {
       interval = setInterval(() => {
         setSeconds(prev => prev + 1);
       }, 1000);
@@ -205,6 +173,58 @@ export const AIFarmerCallModal: React.FC<AIFarmerCallModalProps> = ({
       chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
     }
   }, [dialogue]);
+
+  const startTelephonyCall = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!phoneNumber.trim()) {
+      setErrorMsg('Please enter a valid phone number.');
+      return;
+    }
+
+    setLoading(true);
+    setErrorMsg(null);
+    setConfigPending(false);
+
+    try {
+      const res = await fetchWithAuth('/api/ai-calls', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phoneNumber })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        if (data.code === 'TELEPHONY_NOT_CONFIGURED' || res.status === 400) {
+          setConfigPending(true);
+          setErrorMsg(data.message || 'Telephony provider configuration required.');
+        } else {
+          setErrorMsg(data.error?.message || 'Carrier timeout. Failed to connect to outbound phone trunk.');
+        }
+      } else {
+        // Success: Connection established via Twilio!
+        setCallState('calling');
+        connectNeuralSandbox();
+      }
+    } catch (err: any) {
+      setErrorMsg('Network error connecting to AI outbound system.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const connectNeuralSandbox = () => {
+    setCallState('calling');
+    setTimeout(() => {
+      setCallState('ask_crop');
+      setTimeout(() => {
+        addDialogueMessage(
+          'AgriMitra (AI Calling Assistant)',
+          'Namaste Ramesh ji! Main AgriChain se aapka AI Calling Assistant AgriMitra bol raha hoon. Ramesh ji, aaj aapke khet mein kaun si fasal (crop) taiyyar hui hai bechne ke liye?',
+          true
+        );
+      }, 500);
+    }, 1500);
+  };
 
   // Handle Farmer Answering Step 1: Crop
   const handleSelectCrop = (selectedCrop: string) => {
@@ -270,92 +290,6 @@ export const AIFarmerCallModal: React.FC<AIFarmerCallModalProps> = ({
         true
       );
     }, 1800);
-  };
-
-  // Auto-Play Demonstration sequence
-  const startAutoPlay = () => {
-    setIsAutoPlaying(true);
-    speech.stopSpeech();
-
-    // Reset conversation to initial state
-    setDialogue([]);
-    setCallState('ask_crop');
-    setHarvestData({
-      crop: '',
-      quantityKg: 0,
-      minAcceptablePrice: 0,
-      sellingWindow: 'Tomorrow Morning',
-      qualityGrade: 'Grade A',
-      location: 'Sanwer (Village Cluster A), Indore'
-    });
-
-    // Step 1: AI asks Crop
-    addDialogueMessage(
-      'AgriMitra (AI Calling Assistant)',
-      'Namaste Ramesh ji! Main AgriChain se aapka AI Calling Assistant AgriMitra bol raha hoon. Ramesh ji, aaj aapke khet mein kaun si fasal (crop) taiyyar hui hai bechne ke liye?',
-      true
-    );
-
-    // After 3.5s: Farmer answers "Tamatar"
-    autoPlayTimeoutRef.current = setTimeout(() => {
-      setHarvestData(prev => ({ ...prev, crop: 'Tomato' }));
-      addDialogueMessage(
-        'Ramesh Patel (Farmer)',
-        'Bhaiya hamare paas Tamatar (Tomato) taiyyar hai.',
-        false
-      );
-
-      // After 3.5s: AI asks Quantity
-      autoPlayTimeoutRef.current = setTimeout(() => {
-        setCallState('ask_quantity');
-        addDialogueMessage(
-          'AgriMitra (AI Calling Assistant)',
-          'Bahut achha, Tamatar! Aur Tamatar ka kitna amount (quantity / wazan) hai aapke paas bechne ke liye?',
-          true
-        );
-
-        // After 3.5s: Farmer answers "150 kg"
-        autoPlayTimeoutRef.current = setTimeout(() => {
-          setHarvestData(prev => ({ ...prev, quantityKg: 150 }));
-          addDialogueMessage(
-            'Ramesh Patel (Farmer)',
-            'Lagbhag 150 kilo tamatar hai, kal subah tak pack ho jayega.',
-            false
-          );
-
-          // After 3.5s: AI asks Minimum Price
-          autoPlayTimeoutRef.current = setTimeout(() => {
-            setCallState('ask_price');
-            addDialogueMessage(
-              'AgriMitra (AI Calling Assistant)',
-              'Samajh gaya 150 kilo. Ramesh ji, aapka minimum price (kam se kam bhav) kya hona chahiye prati kilo taaki aapko pura munafa mile?',
-              true
-            );
-
-            // After 3.5s: Farmer answers "14 rupaye"
-            autoPlayTimeoutRef.current = setTimeout(() => {
-              setHarvestData(prev => ({ ...prev, minAcceptablePrice: 14 }));
-              addDialogueMessage(
-                'Ramesh Patel (Farmer)',
-                'Kam se kam 14 rupaye kilo bhav milna chahiye bhaiya.',
-                false
-              );
-
-              // After 3.5s: AI Confirms
-              autoPlayTimeoutRef.current = setTimeout(() => {
-                setCallState('completed');
-                setIsAutoPlaying(false);
-                addDialogueMessage(
-                  'AgriMitra (AI Calling Assistant)',
-                  'Bilkul theek Ramesh ji! 150 kg Tamatar @ minimum ₹14/kg confirm ho gaya hai. AgriChain Indore ke buyers aur shared return-trucks compile kar raha hai. Dhanyawad!',
-                  true
-                );
-              }, 3600);
-            }, 3600);
-          }, 3600);
-        }, 3600);
-      }, 3600);
-    }, 3600);
   };
 
   // Free-form speech or text handler via AI processing
@@ -427,21 +361,6 @@ export const AIFarmerCallModal: React.FC<AIFarmerCallModalProps> = ({
     }
   };
 
-  // Quick options handler (🌾 Sell my crop, 💰 Check price, 🚚 Find transport, 📦 Track order, 💬 Talk to support)
-  const handleQuickOptionClick = (option: string) => {
-    if (option.includes('Sell')) {
-      handleCustomInput('Mujhe meri fasal bechni hai');
-    } else if (option.includes('price')) {
-      handleCustomInput('Aaj tamatar ka kya bhav chal raha hai?');
-    } else if (option.includes('transport')) {
-      handleCustomInput('Sanwer se Indore ke liye truck chahiye');
-    } else if (option.includes('Track')) {
-      handleCustomInput('Meri consignment ORD-1024 ka status kya hai?');
-    } else if (option.includes('support')) {
-      handleCustomInput('Support se baat karni hai');
-    }
-  };
-
   // Speech Recognition Mic Toggle
   const handleToggleMic = () => {
     if (isListening) {
@@ -471,7 +390,6 @@ export const AIFarmerCallModal: React.FC<AIFarmerCallModalProps> = ({
         console.warn('Speech recognition error:', err);
       }
     } else {
-      // Fallback
       if (callState === 'ask_crop') handleSelectCrop('Tomato');
       else if (callState === 'ask_quantity') handleSelectQuantity(150);
       else if (callState === 'ask_price') handleSelectPrice(14);
@@ -497,14 +415,16 @@ export const AIFarmerCallModal: React.FC<AIFarmerCallModalProps> = ({
 
     if (save) {
       setTimeout(() => {
-        onHarvestCreated({
-          crop: harvestData.crop || 'Tomato',
-          quantityKg: harvestData.quantityKg || 100,
-          location: harvestData.location,
-          minAcceptablePrice: harvestData.minAcceptablePrice || 12,
-          qualityGrade: harvestData.qualityGrade,
-          sellingWindow: harvestData.sellingWindow,
-        });
+        if (onHarvestCreated) {
+          onHarvestCreated({
+            crop: harvestData.crop || 'Tomato',
+            quantityKg: harvestData.quantityKg || 100,
+            location: harvestData.location,
+            minAcceptablePrice: harvestData.minAcceptablePrice || 12,
+            qualityGrade: harvestData.qualityGrade,
+            sellingWindow: harvestData.sellingWindow,
+          });
+        }
         onClose();
       }, 1000);
     } else {
@@ -521,493 +441,267 @@ export const AIFarmerCallModal: React.FC<AIFarmerCallModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
-      <div className="bg-slate-950 text-white rounded-3xl max-w-xl w-full border border-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[92vh]">
+    <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 text-white">
+      <div className="bg-slate-950 rounded-3xl max-w-xl w-full border border-slate-800 shadow-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[92vh]">
         
-        {/* Call Top Header */}
-        <div className="p-4 sm:p-5 text-center space-y-3 border-b border-slate-800/80 bg-gradient-to-b from-slate-900 to-slate-950 shrink-0">
-          
-          {/* Status micro-bar */}
-          <div className="flex items-center justify-between text-xs text-slate-400 pb-1">
-            <div className="flex items-center gap-2">
-              <span className="flex items-center gap-1.5 text-emerald-400 font-semibold font-mono text-[11px]">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-                AI Telephony Calling Agent
-              </span>
-              <span className="text-slate-600">|</span>
-              <span className="text-[10px] text-slate-300 bg-slate-800 px-2 py-0.5 rounded-full font-medium">
-                Crop &bull; Amount &bull; Minimum Price
-              </span>
+        {/* Header bar */}
+        <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/60 shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-amber-600 flex items-center justify-center">
+              <PhoneCall className="w-4 h-4" />
             </div>
-
-            <div className="flex items-center gap-2">
-              {/* Voice Mute Toggle */}
-              <button
-                type="button"
-                onClick={handleToggleMute}
-                className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
-                  isMuted 
-                    ? 'bg-rose-950/70 border-rose-600/50 text-rose-400' 
-                    : 'bg-emerald-950/70 border-emerald-600/50 text-emerald-300 hover:bg-emerald-900'
-                }`}
-                title={isMuted ? 'Voice Muted (Click to Unmute)' : 'Voice Playing Aloud (Click to Mute)'}
-              >
-                {isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
-              </button>
-
-              {/* Close Button */}
-              <button 
-                onClick={() => handleEndCall(false)} 
-                className="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-slate-300 hover:text-white cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
+            <div>
+              <h3 className="text-sm font-bold font-display">AgriMitra Voice Agent (Real AI Calling)</h3>
+              <p className="text-[10px] text-slate-400">Outbound calling via Exotel & Gemini real-time NLU</p>
             </div>
           </div>
-
-          {/* Caller Identity with Pulse Ring */}
-          <div className="relative w-16 h-16 sm:w-20 sm:h-20 mx-auto">
-            <div className={`w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gradient-to-tr from-slate-800 to-slate-700 border-2 ${
-              isSpeaking ? 'border-emerald-400 shadow-lg shadow-emerald-500/20' : 'border-slate-700'
-            } flex items-center justify-center text-emerald-400 font-bold shadow-xl transition-all duration-300`}>
-              <User className="w-8 h-8 sm:w-10 sm:h-10 text-emerald-400" />
-            </div>
-
-            {isSpeaking && (
-              <span className="absolute -inset-1 rounded-full border-2 border-emerald-500/60 animate-ping pointer-events-none"></span>
-            )}
-          </div>
-
-          <div>
-            <h3 className="text-base sm:text-lg font-bold font-display text-white">
-              Calling: Ramesh Patel (Smallholder Farmer)
-            </h3>
-            <p className="text-xs text-slate-400 font-mono mt-0.5">
-              +91 98260 11234 &bull; Sanwer Village Cluster, Indore, MP
-            </p>
-          </div>
-
-          {/* Connection State & Equalizer */}
-          <div className="flex items-center justify-center gap-3">
-            <div className="text-xs font-mono font-bold">
-              {callState === 'calling' && (
-                <span className="text-amber-400 flex items-center gap-1.5 animate-pulse">
-                  <PhoneCall className="w-3.5 h-3.5 animate-bounce" />
-                  Ringing Outbound Telephony Line (440Hz)...
-                </span>
-              )}
-              {callState !== 'calling' && callState !== 'ended' && (
-                <span className="text-emerald-400 flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-                  Call Connected &bull; {formatTime(seconds)}
-                </span>
-              )}
-              {callState === 'ended' && <span className="text-slate-400">Call Terminated</span>}
-            </div>
-
-            {/* Speaking Waveform Equalizer */}
-            {isSpeaking && !isMuted && (
-              <div className="flex items-center gap-0.5 h-3.5 px-2 py-0.5 bg-emerald-950/80 border border-emerald-500/40 rounded-full">
-                <span className="w-1 h-2 bg-emerald-400 rounded-full animate-pulse" style={{ animationDuration: '0.4s' }}></span>
-                <span className="w-1 h-3.5 bg-emerald-400 rounded-full animate-pulse" style={{ animationDuration: '0.2s' }}></span>
-                <span className="w-1 h-2.5 bg-emerald-400 rounded-full animate-pulse" style={{ animationDuration: '0.5s' }}></span>
-                <span className="w-1 h-1.5 bg-emerald-400 rounded-full animate-pulse" style={{ animationDuration: '0.3s' }}></span>
-                <span className="text-[10px] text-emerald-300 font-bold ml-1 font-mono">SPEAKING</span>
-              </div>
-            )}
-          </div>
-
-          {/* Question Sequence Stepper Tabs */}
-          <div className="grid grid-cols-3 gap-1.5 pt-2 text-[11px] font-semibold border-t border-slate-800">
-            <div className={`p-2 rounded-xl flex items-center justify-center gap-1.5 border transition-all ${
-              callState === 'ask_crop' 
-                ? 'bg-emerald-900/60 border-emerald-500 text-emerald-300 ring-1 ring-emerald-500/40' 
-                : harvestData.crop
-                  ? 'bg-slate-900/90 border-emerald-700/50 text-emerald-400' 
-                  : 'bg-slate-900/40 border-slate-800 text-slate-500'
-            }`}>
-              <Sprout className="w-3.5 h-3.5 shrink-0" />
-              <div className="truncate">
-                <span className="text-[9px] block text-slate-400 uppercase font-mono">Q1: Crop</span>
-                <span>{harvestData.crop || 'Kaun Sa Crop?'}</span>
-              </div>
-            </div>
-
-            <div className={`p-2 rounded-xl flex items-center justify-center gap-1.5 border transition-all ${
-              callState === 'ask_quantity' 
-                ? 'bg-emerald-900/60 border-emerald-500 text-emerald-300 ring-1 ring-emerald-500/40' 
-                : harvestData.quantityKg
-                  ? 'bg-slate-900/90 border-emerald-700/50 text-emerald-400' 
-                  : 'bg-slate-900/40 border-slate-800 text-slate-500'
-            }`}>
-              <Scale className="w-3.5 h-3.5 shrink-0" />
-              <div className="truncate">
-                <span className="text-[9px] block text-slate-400 uppercase font-mono">Q2: Amount</span>
-                <span>{harvestData.quantityKg ? `${harvestData.quantityKg} kg` : 'Kitna Amount?'}</span>
-              </div>
-            </div>
-
-            <div className={`p-2 rounded-xl flex items-center justify-center gap-1.5 border transition-all ${
-              callState === 'ask_price' 
-                ? 'bg-emerald-900/60 border-emerald-500 text-emerald-300 ring-1 ring-emerald-500/40' 
-                : harvestData.minAcceptablePrice
-                  ? 'bg-slate-900/90 border-emerald-700/50 text-emerald-400' 
-                  : 'bg-slate-900/40 border-slate-800 text-slate-500'
-            }`}>
-              <DollarSign className="w-3.5 h-3.5 shrink-0" />
-              <div className="truncate">
-                <span className="text-[9px] block text-slate-400 uppercase font-mono">Q3: Min Price</span>
-                <span>{harvestData.minAcceptablePrice ? `₹${harvestData.minAcceptablePrice}/kg` : 'Min Bhav?'}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Mode & Auto-Play Controls Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px]">
-            <button
-              type="button"
-              onClick={startAutoPlay}
-              disabled={isAutoPlaying || callState === 'calling'}
-              className="bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-700/60 text-indigo-200 px-3 py-1 rounded-lg flex items-center gap-1.5 font-semibold cursor-pointer disabled:opacity-50 transition-colors"
-            >
-              <Play className="w-3 h-3 text-indigo-400" />
-              <span>{isAutoPlaying ? 'Auto-Playing Demo...' : 'Auto-Play 3 Questions Demo'}</span>
-            </button>
-
-            <div className="flex items-center gap-2">
-              <select
-                value={preferredLang}
-                onChange={(e) => setPreferredLang(e.target.value as 'hi' | 'en')}
-                className="bg-slate-900 border border-slate-800 text-slate-300 rounded-lg px-2 py-1 text-[11px] focus:outline-none"
-              >
-                <option value="hi">Voice: Hindi</option>
-                <option value="en">Voice: Indian Eng</option>
-              </select>
-
-              <select
-                value={speechRate}
-                onChange={(e) => setSpeechRate(Number(e.target.value))}
-                className="bg-slate-900 border border-slate-800 text-slate-300 rounded-lg px-2 py-1 text-[11px] focus:outline-none"
-              >
-                <option value={0.85}>0.85x Speed</option>
-                <option value={1.0}>1.0x Normal</option>
-                <option value={1.15}>1.15x Fast</option>
-              </select>
-            </div>
-          </div>
+          <button
+            onClick={onClose}
+            className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
 
-        {/* Quick Options Bar (How can I help?) */}
-        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-2 px-4 border-b border-slate-800/80 bg-slate-900/60 text-[11px] shrink-0">
-          <span className="text-slate-400 font-medium shrink-0">How can I help?</span>
-          {['🌾 Sell my crop', '💰 Check price', '🚚 Find transport', '📦 Track order', '💬 Talk to support'].map((opt) => (
-            <button
-              key={opt}
-              type="button"
-              onClick={() => handleQuickOptionClick(opt)}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white px-2.5 py-1 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer transition-colors"
-            >
-              {opt}
-            </button>
-          ))}
-        </div>
+        {/* Dynamic Content Stages */}
+        <div className="p-6 overflow-y-auto flex-1 flex flex-col space-y-5">
+          {callState === 'initiate_call' ? (
+            /* Stage 0: Enter Phone Number and Initiate */
+            <form onSubmit={startTelephonyCall} className="space-y-5 py-6">
+              <div className="text-center space-y-1.5 max-w-md mx-auto">
+                <h4 className="text-base font-bold text-slate-100">Establish Neural Voice Call</h4>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  AgriMitra will call the farmer's registered phone number using Exotel, speak naturally in Hinglish, and translate spoken details into live harvests.
+                </p>
+              </div>
 
-        {/* Live Conversation Transcript with Replay buttons */}
-        <div 
-          ref={chatScrollRef} 
-          className="p-4 overflow-y-auto space-y-3 text-xs flex-1 bg-slate-950/70"
-        >
-          {dialogue.map((item) => {
-            const isCurrentlySpeakingThis = currentSpeakingId === item.id;
+              {errorMsg && (
+                <div className="p-4 bg-rose-950/50 border border-rose-800/60 rounded-2xl text-xs space-y-3">
+                  <div className="flex items-center gap-2 text-rose-400 font-bold">
+                    <AlertCircle className="w-4 h-4" /> Exotel Configuration Notice
+                  </div>
+                  <p className="text-slate-300 leading-relaxed text-[11px]">{errorMsg}</p>
+                </div>
+              )}
 
-            return (
-              <div
-                key={item.id}
-                className={`p-3.5 rounded-2xl max-w-[88%] transition-all ${
-                  item.isAi
-                    ? 'bg-slate-900 text-slate-100 ml-auto rounded-tr-none border border-slate-800 shadow-sm'
-                    : 'bg-emerald-950/80 text-emerald-100 mr-auto rounded-tl-none border border-emerald-800/40 shadow-sm'
-                } ${isCurrentlySpeakingThis ? 'ring-2 ring-emerald-500/60 shadow-lg shadow-emerald-900/40' : ''}`}
-              >
-                <div className="flex items-center justify-between gap-2 mb-1 opacity-80 text-[10px]">
-                  <span className="font-bold flex items-center gap-1">
-                    {item.isAi ? '🤖 ' : '👨‍🌾 '}
-                    {item.speaker}
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    <span>{item.timestamp}</span>
+              <div className="max-w-md mx-auto space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Farmer Contact Number</label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400 font-bold text-xs">📞</span>
+                  <input
+                    type="text"
+                    value={phoneNumber}
+                    onChange={(e) => setPhoneNumber(e.target.value)}
+                    placeholder="+91 98260 11234"
+                    className="w-full bg-slate-900 border border-slate-800 pl-10 pr-4 py-3 text-xs font-mono font-bold rounded-xl focus:outline-none focus:border-amber-500"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="max-w-md mx-auto pt-2">
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full py-3 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition-transform active:scale-95 cursor-pointer disabled:opacity-50"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Initiating Trunk Routing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <PhoneCall className="w-4 h-4" />
+                      <span>Dial Outbound AI Agent</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          ) : (
+            /* Active Call Interface & Dialogue Sandbox */
+            <div className="flex-1 flex flex-col min-h-0 space-y-4">
+              {/* Call identity segment */}
+              <div className="flex items-center justify-between p-3.5 bg-slate-900/40 border border-slate-800/80 rounded-2xl shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="relative w-10 h-10 bg-slate-800 rounded-full flex items-center justify-center border-2 border-emerald-500">
+                    <User className="w-5 h-5 text-emerald-400" />
+                    {isSpeaking && <span className="absolute -inset-0.5 rounded-full border border-emerald-400 animate-ping"></span>}
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-white">Active Dial: {phoneNumber}</h4>
+                    <span className="text-[10px] text-slate-400 flex items-center gap-1 font-mono">
+                      {callState === 'calling' ? (
+                        <span className="text-amber-400 flex items-center gap-1 animate-pulse">
+                          Ringing carrier...
+                        </span>
+                      ) : (
+                        <span className="text-emerald-400 flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-pulse"></span>
+                          Agent Speaking &bull; {formatTime(seconds)}
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleToggleMute}
+                  className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl"
+                >
+                  {isMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
+                </button>
+              </div>
+
+              {/* Neural Wave Stepper */}
+              <div className="grid grid-cols-3 gap-1.5 shrink-0 text-[10px] font-semibold">
+                <div className={`p-2 rounded-xl flex items-center justify-center gap-1 border ${
+                  callState === 'ask_crop' ? 'bg-emerald-950 border-emerald-500 text-emerald-300' : 'bg-slate-900 border-slate-800 text-slate-500'
+                }`}>
+                  <Sprout className="w-3.5 h-3.5" />
+                  <span>Q1: {harvestData.crop || 'Crop'}</span>
+                </div>
+                <div className={`p-2 rounded-xl flex items-center justify-center gap-1 border ${
+                  callState === 'ask_quantity' ? 'bg-emerald-950 border-emerald-500 text-emerald-300' : 'bg-slate-900 border-slate-800 text-slate-500'
+                }`}>
+                  <Scale className="w-3.5 h-3.5" />
+                  <span>Q2: {harvestData.quantityKg ? `${harvestData.quantityKg} kg` : 'Amount'}</span>
+                </div>
+                <div className={`p-2 rounded-xl flex items-center justify-center gap-1 border ${
+                  callState === 'ask_price' ? 'bg-emerald-950 border-emerald-500 text-emerald-300' : 'bg-slate-900 border-slate-800 text-slate-500'
+                }`}>
+                  <DollarSign className="w-3.5 h-3.5" />
+                  <span>Q3: {harvestData.minAcceptablePrice ? `₹${harvestData.minAcceptablePrice}` : 'Price'}</span>
+                </div>
+              </div>
+
+              {/* Chat Dialogue History */}
+              <div ref={chatScrollRef} className="flex-1 min-h-[140px] bg-slate-950 border border-slate-800/80 rounded-2xl p-4 overflow-y-auto space-y-3.5">
+                {dialogue.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-full text-slate-500 space-y-1 py-10">
+                    <Loader2 className="w-6 h-6 animate-spin text-amber-500" />
+                    <p className="text-xs">Trunk line connecting. Initializing AgriMitra Hinglish agent...</p>
+                  </div>
+                ) : (
+                  dialogue.map((msg) => (
+                    <div key={msg.id} className={`flex ${msg.isAi ? 'justify-start' : 'justify-end'}`}>
+                      <div className={`max-w-[85%] rounded-2xl p-3 text-xs leading-relaxed ${
+                        msg.isAi ? 'bg-slate-900 text-slate-100' : 'bg-emerald-900 text-white'
+                      }`}>
+                        <div className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-0.5 font-mono">
+                          {msg.speaker}
+                        </div>
+                        <p>{msg.text}</p>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Dialogue Response Suggestions */}
+              {callState !== 'completed' && callState !== 'ended' && (
+                <div className="p-3 bg-slate-900/50 border border-slate-800/60 rounded-2xl space-y-2 shrink-0 text-xs">
+                  {callState === 'ask_crop' && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <button onClick={() => handleSelectCrop('Tomato')} className="py-2 px-3 bg-slate-800 hover:bg-emerald-700 rounded-xl font-bold transition-colors cursor-pointer text-left">🍅 Tomato (Tamatar)</button>
+                      <button onClick={() => handleSelectCrop('Onion')} className="py-2 px-3 bg-slate-800 hover:bg-emerald-700 rounded-xl font-bold transition-colors cursor-pointer text-left">🧅 Onion (Pyaz)</button>
+                    </div>
+                  )}
+
+                  {callState === 'ask_quantity' && (
+                    <div className="grid grid-cols-3 gap-2">
+                      <button onClick={() => handleSelectQuantity(150)} className="py-2 px-3 bg-slate-800 hover:bg-emerald-700 rounded-xl font-bold transition-colors text-center">150 kg</button>
+                      <button onClick={() => handleSelectQuantity(500)} className="py-2 px-3 bg-slate-800 hover:bg-emerald-700 rounded-xl font-bold transition-colors text-center">500 kg</button>
+                      <button onClick={() => handleSelectQuantity(1000)} className="py-2 px-3 bg-slate-800 hover:bg-emerald-700 rounded-xl font-bold transition-colors text-center">1,000 kg</button>
+                    </div>
+                  )}
+
+                  {callState === 'ask_price' && (
+                    <div className="grid grid-cols-3 gap-2">
+                      <button onClick={() => handleSelectPrice(12)} className="py-2 px-3 bg-slate-800 hover:bg-emerald-700 rounded-xl font-bold transition-colors text-center">₹12/kg</button>
+                      <button onClick={() => handleSelectPrice(14)} className="py-2 px-3 bg-slate-800 hover:bg-emerald-700 rounded-xl font-bold transition-colors text-center">₹14/kg</button>
+                      <button onClick={() => handleSelectPrice(18)} className="py-2 px-3 bg-slate-800 hover:bg-emerald-700 rounded-xl font-bold transition-colors text-center">₹18/kg</button>
+                    </div>
+                  )}
+
+                  {/* Manual / Speech Text Input Row */}
+                  <div className="flex items-center gap-2 pt-1 border-t border-slate-800/60 mt-1">
+                    <input
+                      type="text"
+                      value={userInputText}
+                      onChange={(e) => setUserInputText(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleCustomInput(userInputText)}
+                      placeholder="Boliye ya type karein (Hinglish spoken feedback)..."
+                      className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500 font-mono"
+                    />
                     <button
                       type="button"
-                      onClick={() => handleReplayAudio(item)}
-                      className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
-                      title="Replay Voice Audio"
+                      onClick={handleToggleMic}
+                      className={`p-2 rounded-xl border ${isListening ? 'bg-rose-600 text-white border-rose-500 animate-pulse' : 'bg-slate-800 text-slate-200 border-slate-700'}`}
                     >
-                      <Volume2 className="w-3 h-3" />
+                      <Mic className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleCustomInput(userInputText)}
+                      disabled={!userInputText.trim()}
+                      className="p-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 rounded-xl text-white font-bold"
+                    >
+                      <Send className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
-                <p className="leading-relaxed text-slate-200 text-xs sm:text-[13px]">{item.text}</p>
-              </div>
-            );
-          })}
+              )}
 
-          {callState === 'calling' && (
-            <div className="text-center py-8 text-slate-400 text-xs space-y-2">
-              <div className="flex justify-center">
-                <span className="w-3 h-3 rounded-full bg-emerald-400 animate-ping"></span>
-              </div>
-              <p>Ringing outbound telephony pipeline &amp; connecting to farmer...</p>
-            </div>
-          )}
-
-          {isProcessingReply && (
-            <div className="p-3 bg-slate-900 rounded-2xl max-w-[80%] ml-auto border border-slate-800 text-slate-400 flex items-center gap-2 italic">
-              <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-400" />
-              <span>AgriMitra is listening and formulating spoken reply...</span>
+              {/* Extraction confirmation Segment */}
+              {(harvestData.crop || harvestData.quantityKg > 0 || harvestData.minAcceptablePrice > 0) && (
+                <div className="p-3.5 bg-slate-900 border border-slate-800 rounded-2xl space-y-1 shrink-0 font-mono">
+                  <div className="flex items-center justify-between text-[11px] text-slate-300 font-bold border-b border-slate-800 pb-1.5 mb-1">
+                    <span>Extracted Harvest Summary (Hinglish Spoken NLU)</span>
+                    <span className="text-[10px] text-amber-400 font-mono">
+                      {callState === 'completed' ? '✓ Processing complete' : 'Extracting metrics...'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-[11px]">
+                    <div>Fasal: <strong className="text-white">{harvestData.crop || 'Pending...'}</strong></div>
+                    <div>Quantity: <strong className="text-white">{harvestData.quantityKg ? `${harvestData.quantityKg} kg` : 'Pending...'}</strong></div>
+                    <div>Min Price: <strong className="text-emerald-400">{harvestData.minAcceptablePrice ? `₹${harvestData.minAcceptablePrice}/kg` : 'Pending...'}</strong></div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
 
-        {/* Dynamic Action Buttons for the Active Question */}
-        {callState !== 'calling' && callState !== 'ended' && !isAutoPlaying && (
-          <div className="p-3.5 bg-slate-900/95 border-t border-slate-800/90 space-y-2 shrink-0">
-            
-            {/* Question 1 Action Chips: Select Crop */}
-            {callState === 'ask_crop' && (
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between text-[11px] text-slate-400">
-                  <span className="font-semibold text-emerald-400 flex items-center gap-1">
-                    <Sprout className="w-3.5 h-3.5" />
-                    AgriMitra is asking: &ldquo;Kaun si fasal (crop) hai?&rdquo;
-                  </span>
-                  <span>Tap to reply:</span>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => handleSelectCrop('Tomato')}
-                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-emerald-600 hover:text-white border border-slate-700 text-slate-200 text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <span>🍅</span>
-                    <span>Tomato (Tamatar)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSelectCrop('Onion')}
-                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-emerald-600 hover:text-white border border-slate-700 text-slate-200 text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <span>🧅</span>
-                    <span>Onion (Pyaz)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSelectCrop('Potato')}
-                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-emerald-600 hover:text-white border border-slate-700 text-slate-200 text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <span>🥔</span>
-                    <span>Potato (Aloo)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSelectCrop('Garlic')}
-                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-emerald-600 hover:text-white border border-slate-700 text-slate-200 text-xs font-bold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <span>🧄</span>
-                    <span>Garlic (Lahsun)</span>
-                  </button>
-                </div>
-              </div>
-            )}
+        {/* Footer actions */}
+        {callState !== 'initiate_call' && (
+          <div className="p-4 bg-slate-900 border-t border-slate-800 flex items-center justify-between gap-3 shrink-0">
+            <span className="text-[10px] text-slate-400 leading-relaxed max-w-xs block sm:inline">
+              Neural NLU parser mapping spoken answers directly to DB.
+            </span>
 
-            {/* Question 2 Action Chips: Select Amount / Quantity */}
-            {callState === 'ask_quantity' && (
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between text-[11px] text-slate-400">
-                  <span className="font-semibold text-emerald-400 flex items-center gap-1">
-                    <Scale className="w-3.5 h-3.5" />
-                    AgriMitra is asking: &ldquo;Kitna amount (quantity / wazan) hai?&rdquo;
-                  </span>
-                  <span>Select quantity:</span>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => handleSelectQuantity(100)}
-                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-emerald-600 hover:text-white border border-slate-700 text-slate-200 text-xs font-bold transition-colors flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    <span>100 kg (Small Lot)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSelectQuantity(250)}
-                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-emerald-600 hover:text-white border border-slate-700 text-slate-200 text-xs font-bold transition-colors flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    <span>250 kg (Standard)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSelectQuantity(500)}
-                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-emerald-600 hover:text-white border border-slate-700 text-slate-200 text-xs font-bold transition-colors flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    <span>500 kg (5 Quintal)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSelectQuantity(1000)}
-                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-emerald-600 hover:text-white border border-slate-700 text-slate-200 text-xs font-bold transition-colors flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    <span>1,000 kg (10 Quintal)</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Question 3 Action Chips: Select Minimum Acceptable Price */}
-            {callState === 'ask_price' && (
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between text-[11px] text-slate-400">
-                  <span className="font-semibold text-emerald-400 flex items-center gap-1">
-                    <DollarSign className="w-3.5 h-3.5" />
-                    AgriMitra is asking: &ldquo;Aapka minimum price (bhav) kya hona chahiye?&rdquo;
-                  </span>
-                  <span>Select minimum bhav:</span>
-                </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => handleSelectPrice(12)}
-                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-emerald-600 hover:text-white border border-slate-700 text-slate-200 text-xs font-bold transition-colors flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    <span>₹12 / kg (Mandi Floor)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSelectPrice(14)}
-                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-emerald-600 hover:text-white border border-slate-700 text-emerald-300 text-xs font-bold transition-colors flex items-center justify-center gap-1 cursor-pointer ring-1 ring-emerald-500/40"
-                  >
-                    <span>₹14 / kg (Target Net)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSelectPrice(16)}
-                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-emerald-600 hover:text-white border border-slate-700 text-slate-200 text-xs font-bold transition-colors flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    <span>₹16 / kg (Premium)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSelectPrice(18)}
-                    className="p-2.5 rounded-xl bg-slate-800 hover:bg-emerald-600 hover:text-white border border-slate-700 text-slate-200 text-xs font-bold transition-colors flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    <span>₹18 / kg (Direct Buyer)</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Custom Mic Speech & Text Input */}
-            <div className="flex items-center gap-2 pt-1">
-              <input
-                type="text"
-                value={userInputText}
-                onChange={(e) => setUserInputText(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleCustomInput(userInputText)}
-                placeholder={
-                  callState === 'ask_crop'
-                    ? 'Boliye ya type karein (e.g., "Tamatar hai", "Onion hai")...'
-                    : callState === 'ask_quantity'
-                      ? 'Boliye ya type karein (e.g., "200 kilo", "5 quintal")...'
-                      : callState === 'ask_price'
-                        ? 'Boliye ya type karein (e.g., "14 rupaye kilo bhav chahiye")...'
-                        : 'Reply to AgriMitra...'
-                }
-                className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-emerald-500"
-              />
-
-              {/* Mic Button */}
+            <div className="flex items-center gap-2">
               <button
-                type="button"
-                onClick={handleToggleMic}
-                className={`p-2 rounded-xl border transition-all cursor-pointer ${
-                  isListening
-                    ? 'bg-rose-600 text-white border-rose-500 animate-pulse'
-                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
-                }`}
-                title={isListening ? 'Listening to voice...' : 'Click to Speak via Microphone'}
+                onClick={() => handleEndCall(false)}
+                className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold py-2 px-3 rounded-xl flex items-center gap-1 cursor-pointer transition-transform active:scale-95"
               >
-                <Mic className="w-4 h-4" />
+                <PhoneOff className="w-3.5 h-3.5" />
+                <span>Hang Up</span>
               </button>
 
-              {/* Send Button */}
               <button
-                type="button"
-                onClick={() => handleCustomInput(userInputText)}
-                disabled={!userInputText.trim()}
-                className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white p-2 rounded-xl transition-colors cursor-pointer"
+                onClick={() => handleEndCall(true)}
+                disabled={!harvestData.crop && !harvestData.quantityKg}
+                className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold py-2 px-4 rounded-xl flex items-center gap-1.5 cursor-pointer transition-transform active:scale-95"
               >
-                <Send className="w-4 h-4" />
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Confirm &amp; Compile</span>
               </button>
             </div>
           </div>
         )}
-
-        {/* Live Extracted Harvest Card */}
-        {(harvestData.crop || harvestData.quantityKg > 0 || harvestData.minAcceptablePrice > 0) && (
-          <div className="mx-4 my-2 bg-emerald-950/40 border border-emerald-500/40 rounded-2xl p-3 space-y-1.5 shrink-0">
-            <div className="flex items-center justify-between text-xs font-bold text-emerald-300">
-              <div className="flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Extracted Harvest Intelligence (Spoken NLU)</span>
-              </div>
-              <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-full border border-emerald-500/30 font-mono">
-                {callState === 'completed' ? '✓ All 3 Answers Confirmed' : 'Collecting Details...'}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2 text-[11px] font-mono">
-              <div className="text-slate-300">
-                1. Crop: <strong className="text-white">{harvestData.crop || 'Pending...'}</strong>
-              </div>
-              <div className="text-slate-300">
-                2. Amount: <strong className="text-white">{harvestData.quantityKg ? `${harvestData.quantityKg} kg` : 'Pending...'}</strong>
-              </div>
-              <div className="text-slate-300">
-                3. Min Price: <strong className="text-emerald-400">{harvestData.minAcceptablePrice ? `₹${harvestData.minAcceptablePrice}/kg` : 'Pending...'}</strong>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Call Footer Controls */}
-        <div className="p-4 bg-slate-900 border-t border-slate-800 flex items-center justify-between gap-3 shrink-0">
-          <div className="text-[11px] text-slate-400">
-            <span className="text-emerald-400 font-semibold">AgriMitra Voice:</span> Telephony call active with neural voice questions.
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              id="btn-hangup-call"
-              type="button"
-              onClick={() => handleEndCall(false)}
-              className="bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold py-2.5 px-3.5 rounded-xl shadow-md flex items-center gap-1.5 cursor-pointer transition-transform active:scale-95"
-              title="Hang up call"
-            >
-              <PhoneOff className="w-4 h-4" />
-              <span>Hang Up</span>
-            </button>
-
-            <button
-              id="btn-confirm-ai-call"
-              type="button"
-              onClick={() => handleEndCall(true)}
-              disabled={!harvestData.crop && !harvestData.quantityKg}
-              className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold py-2.5 px-4 rounded-xl shadow-md flex items-center gap-2 cursor-pointer transition-transform active:scale-95"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              <span>Confirm &amp; Compile Chains</span>
-            </button>
-          </div>
-        </div>
 
       </div>
     </div>

@@ -15,6 +15,8 @@ import priceRoutes from './price.routes';
 import governmentRoutes from './government.routes';
 import orderRoutes from './order.routes';
 import mandiRoutes from './mandi.routes';
+import feedbackRoutes from './feedback.routes';
+import aiCallsRoutes from './ai-calls.routes';
 import { handleMandiPricesRoute } from '../services/mandi';
 
 const router = Router();
@@ -34,6 +36,8 @@ router.use('/prices', priceRoutes);
 router.use('/government', governmentRoutes);
 router.use('/orders', orderRoutes);
 router.use('/mandi', mandiRoutes);
+router.use('/feedback', feedbackRoutes);
+router.use('/ai-calls', aiCallsRoutes);
 
 // AGMARKNET real-time Mandi Price endpoint with error handling, normalization, farmer resolution, and Supabase caching
 router.get('/mandi-prices', handleMandiPricesRoute);

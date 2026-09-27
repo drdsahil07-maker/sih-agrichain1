@@ -108,3 +108,183 @@ export const getLogistics = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ success: false, error: { message: error.message } });
   }
 };
+
+export const getFarmers = async (req: AuthRequest, res: Response) => {
+  try {
+    const supabase = getScopedClient(req);
+    const { data: farmers, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('role', 'farmer')
+      .order('full_name', { ascending: true });
+
+    if (error) throw error;
+    res.json({ success: true, data: farmers || [] });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: { message: error.message } });
+  }
+};
+
+export const getExotelStatus = async (req: AuthRequest, res: Response) => {
+  const configured = !!(
+    process.env.EXOTEL_ACCOUNT_SID &&
+    process.env.EXOTEL_API_KEY &&
+    process.env.EXOTEL_API_TOKEN &&
+    process.env.EXOTEL_EXOPHONE
+  );
+  const streamConfigured = !!process.env.EXOTEL_STREAM_URL;
+
+  res.json({
+    provider: "Exotel",
+    configured,
+    streamConfigured
+  });
+};
+
+export const initiateAdminFarmerCall = async (req: AuthRequest, res: Response) => {
+  try {
+    const { farmerId } = req.body;
+    const user = req.user;
+
+    if (!user || user.role !== 'government_admin') {
+      return res.status(403).json({
+        success: false,
+        error: { code: 'FORBIDDEN', message: 'Only government administrators can trigger outbound farmer alerts.' }
+      });
+    }
+
+    if (!farmerId) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'BAD_REQUEST', message: 'Farmer ID is required.' }
+      });
+    }
+
+    const supabase = getScopedClient(req);
+
+    // Fetch the target farmer profile
+    const { data: farmer, error: profileErr } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', farmerId)
+      .eq('role', 'farmer')
+      .single();
+
+    if (profileErr || !farmer) {
+      return res.status(404).json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'Farmer profile not found.' }
+      });
+    }
+
+    const rawPhone = farmer.phone_number || '';
+    const cleanPhone = rawPhone.replace(/\s+/g, '');
+    if (!cleanPhone) {
+      return res.status(400).json({
+        success: false,
+        error: { code: 'NO_PHONE_NUMBER', message: 'This farmer does not have a registered contact number.' }
+      });
+    }
+
+    const sid = process.env.EXOTEL_ACCOUNT_SID;
+    const apiKey = process.env.EXOTEL_API_KEY;
+    const apiToken = process.env.EXOTEL_API_TOKEN;
+    const exoPhone = process.env.EXOTEL_EXOPHONE;
+    const streamUrl = process.env.EXOTEL_STREAM_URL || `wss://${req.get('host')}/api/exotel-stream`;
+
+    const isConfigured = !!(sid && apiKey && apiToken && exoPhone);
+
+    if (!isConfigured) {
+      return res.status(400).json({
+        success: false,
+        code: 'EXOTEL_NOT_CONFIGURED',
+        message: 'Real AI calling is not configured. Please define EXOTEL_ACCOUNT_SID, EXOTEL_API_KEY, EXOTEL_API_TOKEN, and EXOTEL_EXOPHONE in your environment settings.'
+      });
+    }
+
+    // Insert call log into database
+    const { data: callRecord, error: dbError } = await supabase
+      .from('ai_calls')
+      .insert({
+        user_id: farmer.id,
+        phone_number: cleanPhone,
+        status: 'initiating',
+        started_at: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    if (dbError) {
+      console.error('[EXOTEL_DB_ERROR]', dbError);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'DATABASE_ERROR', message: dbError.message }
+      });
+    }
+
+    // Trigger Outbound Exotel Call Contract:
+    // POST https://api.exotel.com/v1/Accounts/${sid}/Calls/connect.json
+    try {
+      const response = await fetch(`https://api.exotel.com/v1/Accounts/${sid}/Calls/connect.json`, {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Basic ' + Buffer.from(`${apiKey}:${apiToken}`).toString('base64'),
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: new URLSearchParams({
+          From: cleanPhone,
+          CallerId: exoPhone,
+          StreamUrl: `${streamUrl}?callId=${callRecord.id}`,
+          StreamType: 'bidirectional',
+          StatusCallback: process.env.EXOTEL_STATUS_CALLBACK_URL || `${req.protocol}://${req.get('host')}/api/admin/farmer-calls/status-callback`
+        })
+      });
+
+      const bodyText = await response.text();
+
+      if (!response.ok) {
+        console.error('[EXOTEL_CARRIER_ERROR]', bodyText);
+        await supabase.from('ai_calls').update({ status: 'failed' }).eq('id', callRecord.id);
+        return res.status(502).json({
+          success: false,
+          error: { code: 'EXOTEL_PROVIDER_ERROR', message: 'Exotel voice engine rejected connection. Verify Exotel trial number white-listing or KYC configuration.' }
+        });
+      }
+
+      // Read response SID
+      const xmlMatch = bodyText.match(/<Sid>([^<]+)<\/Sid>/) || bodyText.match(/"Sid":\s*"([^"]+)"/);
+      const exotelCallSid = xmlMatch ? xmlMatch[1] : `ex_sid_${Date.now()}`;
+
+      const { data: updatedRecord } = await supabase
+        .from('ai_calls')
+        .update({
+          status: 'ringing',
+          summary: `Exotel Connect session initiated. Call SID: ${exotelCallSid}`
+        })
+        .eq('id', callRecord.id)
+        .select()
+        .single();
+
+      return res.status(201).json({
+        success: true,
+        callSid: exotelCallSid,
+        call: updatedRecord
+      });
+
+    } catch (carrierErr: any) {
+      console.error('[EXOTEL_CARRIER_EXCEPTION]', carrierErr);
+      await supabase.from('ai_calls').update({ status: 'failed' }).eq('id', callRecord.id);
+      return res.status(500).json({
+        success: false,
+        error: { code: 'CARRIER_TIMEOUT', message: 'Failed to establish route to Exotel carrier server.' }
+      });
+    }
+
+  } catch (err: any) {
+    console.error('[INITIATE_ADMIN_CALL_ERROR]', err);
+    return res.status(500).json({
+      success: false,
+      error: { code: 'SERVER_ERROR', message: err.message }
+    });
+  }
+};
