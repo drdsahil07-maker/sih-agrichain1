@@ -57,6 +57,28 @@ export const assignTransport = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const updateTransporterLocation = async (req: AuthRequest, res: Response) => {
+  try {
+    const { tripId, latitude, longitude, accuracy } = req.body;
+    if (!tripId || latitude === undefined || longitude === undefined) {
+      return res.status(400).json({ success: false, error: { message: 'Missing tripId, latitude, or longitude' } });
+    }
+    const result = await transportService.updateLocation(req, tripId, Number(latitude), Number(longitude), accuracy ? Number(accuracy) : undefined);
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    res.status(err.message.includes('Unauthorized') ? 403 : 500).json({ success: false, error: { message: err.message } });
+  }
+};
+
+export const getTripLocation = async (req: AuthRequest, res: Response) => {
+  try {
+    const location = await transportService.getTripLocation(req, req.params.id);
+    res.json({ success: true, data: location });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: { message: err.message } });
+  }
+};
+
 export const getTransportAnalytics = async (req: AuthRequest, res: Response) => {
   try {
     const stats = await transportService.getTransportAnalytics(req);

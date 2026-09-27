@@ -156,6 +156,47 @@ function mapTripResponse(t: any) {
   };
 }
 
+export const updateLocation = async (req: AuthRequest, tripId: string, latitude: number, longitude: number, accuracy?: number) => {
+  const supabase = getScopedClient(req);
+  const transporterId = req.user?.id;
+  if (!transporterId) throw new Error('Unauthorized');
+
+  // Verify trip belongs to transporter
+  const { data: trip, error: tripErr } = await supabase.from('transport_trips').select('id, transporter_id').eq('id', tripId).single();
+  if (tripErr || !trip || trip.transporter_id !== transporterId) {
+    throw new Error('Unauthorized or trip not found for this transporter');
+  }
+
+  const { data, error } = await supabase.from('transport_locations').insert({
+    trip_id: tripId,
+    transporter_id: transporterId,
+    latitude,
+    longitude,
+    accuracy: accuracy || null,
+    recorded_at: new Date().toISOString()
+  }).select().single();
+
+  if (error) throw new Error(error.message);
+  return data;
+};
+
+export const getTripLocation = async (req: AuthRequest, tripId: string) => {
+  const supabase = getScopedClient(req);
+  const { data, error } = await supabase
+    .from('transport_locations')
+    .select('*')
+    .eq('trip_id', tripId)
+    .order('recorded_at', { ascending: false })
+    .limit(1)
+    .single();
+
+  if (error) {
+    if (error.code === 'PGRST116') return null;
+    throw new Error(error.message);
+  }
+  return data;
+};
+
 export const getTransportAnalytics = async (req: AuthRequest) => {
   const supabase = getScopedClient(req);
   

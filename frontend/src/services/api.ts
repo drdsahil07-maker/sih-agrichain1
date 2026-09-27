@@ -230,6 +230,23 @@ export const api = {
     throw new Error("Failed to create backhaul trip");
   },
 
+  async getTripLocation(tripId: string): Promise<any> {
+    const res = await fetchWithAuth(`/api/transporters/trips/${tripId}/location`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.data;
+  },
+
+  async updateTransporterLocation(tripId: string, latitude: number, longitude: number, accuracy?: number): Promise<any> {
+    const res = await fetchWithAuth('/api/transporters/location', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tripId, latitude, longitude, accuracy })
+    });
+    if (!res.ok) throw new Error("Failed to update location");
+    return await res.json();
+  },
+
   async getBuyerDemands(): Promise<BuyerDemand[]> {
     try {
       const res = await fetchWithAuth('/api/buyers/demand');

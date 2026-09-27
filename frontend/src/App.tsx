@@ -23,6 +23,7 @@ import { Harvest, ChainOption, QualityGrade } from '../../shared/types';
 import { api } from './services/api';
 import { SEED_HARVESTS } from '../../shared/data/seedData';
 import { useAuth } from './context/AuthContext';
+import { useRealtimeNotifications } from './hooks/useRealtimeNotifications';
 import { ShieldAlert, ArrowLeft } from 'lucide-react';
 
 export default function App() {
@@ -53,6 +54,10 @@ export default function App() {
     setNotification(msg);
     setTimeout(() => setNotification(null), 4000);
   };
+
+  useRealtimeNotifications((msg) => {
+    showNotification(`🔔 Realtime: ${msg}`);
+  });
 
   const handleHarvestCreated = (newHarvest: Harvest) => {
     setActiveHarvests((prev) => [newHarvest, ...prev]);

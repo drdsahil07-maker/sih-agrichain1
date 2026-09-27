@@ -7,7 +7,9 @@ import {
   updateTripStatus,
   matchOptions,
   assignTransport,
-  getTransportAnalytics
+  getTransportAnalytics,
+  updateTransporterLocation,
+  getTripLocation
 } from '../controllers/transport.controller';
 
 const router = Router();
@@ -18,6 +20,8 @@ router.get('/trips/:id', requireAuth, getTripById);
 router.post('/trips', requireAuth, createTrip);
 router.post('/backhaul', requireAuth, createTrip); // Keep for backwards compatibility
 router.patch('/trips/:id/status', requireAuth, updateTripStatus);
+router.patch('/location', requireAuth, updateTransporterLocation);
+router.get('/trips/:id/location', requireAuth, getTripLocation);
 
 router.get('/options/:poolId', requireAuth, matchOptions);
 router.post('/match', requireAuth, (req, res) => {

@@ -8,6 +8,58 @@ import { OrderStatusTimeline } from './OrderStatusTimeline';
 
 export const TransporterDashboard: React.FC = () => {
   const { orders, refreshOrders } = useOrders();
+  const [sharingTripId, setSharingTripId] = useState<string | null>(null);
+  const [sharingStatus, setSharingStatus] = useState<'idle' | 'sharing' | 'paused' | 'denied'>('idle');
+  const watchIdRef = React.useRef<number | null>(null);
+
+  const startLocationSharing = (tripId: string) => {
+    if (!navigator.geolocation) {
+      alert("Geolocation is not supported by your browser");
+      return;
+    }
+    setSharingTripId(tripId);
+    setSharingStatus('sharing');
+
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      async (position) => {
+        try {
+          await api.updateTransporterLocation(
+            tripId,
+            position.coords.latitude,
+            position.coords.longitude,
+            position.coords.accuracy
+          );
+        } catch (err) {
+          console.warn("Failed to transmit location update:", err);
+        }
+      },
+      (error) => {
+        console.warn("Geolocation watch error:", error);
+        if (error.code === error.PERMISSION_DENIED) {
+          setSharingStatus('denied');
+        }
+      },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 }
+    );
+  };
+
+  const stopLocationSharing = () => {
+    if (watchIdRef.current !== null) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+    setSharingTripId(null);
+    setSharingStatus('idle');
+  };
+
+  React.useEffect(() => {
+    return () => {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+      }
+    };
+  }, []);
+
   const handleUpdateStatus = async (orderId: string, status: string) => {
     try {
       await api.updateOrderStatus(orderId, status);
@@ -182,6 +234,27 @@ export const TransporterDashboard: React.FC = () => {
               </div>
               
               <div className="flex flex-col gap-2">
+                {order.transport_trip_id && order.status !== 'DELIVERED' && order.status !== 'COMPLETED' && (
+                  <div className="bg-blue-50/60 border border-blue-200 p-3 rounded-xl flex items-center justify-between text-xs">
+                    <div>
+                      <span className="font-bold text-blue-900 block">Live GPS Tracking</span>
+                      <span className="text-blue-700 text-[10px]">
+                        {sharingTripId === order.transport_trip_id && sharingStatus === 'sharing' ? '🟢 Sharing active coordinates' :
+                         sharingStatus === 'denied' ? '🔴 Permission denied' : '⚪ Sharing paused / inactive'}
+                      </span>
+                    </div>
+                    {sharingTripId === order.transport_trip_id && sharingStatus === 'sharing' ? (
+                      <button type="button" onClick={stopLocationSharing} className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg cursor-pointer">
+                        Pause
+                      </button>
+                    ) : (
+                      <button type="button" onClick={() => startLocationSharing(order.transport_trip_id)} className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg cursor-pointer">
+                        Share GPS
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 {order.status === 'TRANSPORT_ASSIGNED' && (
                   <button onClick={() => handleUpdateStatus(order.id, 'PICKUP_READY')} className="w-full py-2 bg-slate-900 text-white rounded-xl text-xs font-bold">Mark Pickup Ready</button>
                 )}
