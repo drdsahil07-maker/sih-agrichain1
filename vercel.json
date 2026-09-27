@@ -5,7 +5,7 @@
       "root": "frontend",
       "framework": "vite",
       "installCommand": "npm --prefix .. install",
-      "buildCommand": "npx --prefix .. vite build --config ../vite.config.ts",
+      "buildCommand": "npx vite build",
       "outputDirectory": "../dist"
     },
     "backend": {
